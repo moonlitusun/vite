@@ -1,5 +1,5 @@
 {
-  "name": "vite",
+  "name": "@dz-web/vite",
   "version": "5.4.3",
   "type": "module",
   "license": "MIT",
