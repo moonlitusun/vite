@@ -1,4 +1,3 @@
-import type { ViteHotContext } from '#types/hot'
 import { HMRClient, HMRContext, type HMRLogger } from '../shared/hmr'
 import { cleanUrl, isPrimitive } from '../shared/utils'
 import { analyzeImportedModDifference } from '../shared/ssrTransform'
@@ -30,6 +29,7 @@ import { createHMRHandlerForRunner } from './hmrHandler'
 import { enableSourceMapSupport } from './sourcemap/index'
 import { ESModulesEvaluator } from './esmEvaluator'
 import { createDefaultImportMeta } from './createImportMeta'
+import type { ViteHotContext } from '#types/hot'
 
 interface ModuleRunnerDebugger {
   (formatter: unknown, ...args: unknown[]): void

@@ -29,13 +29,6 @@ import type {
   TransformAttributeResult as LightningCssTransformAttributeResult,
   TransformResult as LightningCssTransformResult,
 } from 'lightningcss'
-import type {
-  LessPreprocessorBaseOptions,
-  SassModernPreprocessBaseOptions,
-  StylusPreprocessorBaseOptions,
-} from '#types/internal/cssPreprocessorOptions'
-import type { LightningCSSOptions } from '#types/internal/lightningcssOptions'
-import type { CustomPluginOptionsVite } from '#types/metadata'
 import { getCodeWithSourcemap, injectSourcesContent } from '../server/sourcemap'
 import type { EnvironmentModuleNode } from '../server/moduleGraph'
 import {
@@ -106,6 +99,13 @@ import {
 } from './asset'
 import type { ESBuildOptions } from './esbuild'
 import { getChunkOriginalFileName } from './manifest'
+import type { CustomPluginOptionsVite } from '#types/metadata'
+import type { LightningCSSOptions } from '#types/internal/lightningcssOptions'
+import type {
+  LessPreprocessorBaseOptions,
+  SassModernPreprocessBaseOptions,
+  StylusPreprocessorBaseOptions,
+} from '#types/internal/cssPreprocessorOptions'
 
 const decoder = new TextDecoder()
 // const debug = createDebugger('vite:css')
@@ -223,7 +223,8 @@ export function resolveCSSOptions(
   return resolved
 }
 
-const cssModuleRE = new RegExp(`\\.module${CSS_LANGS_RE.source}`)
+const cssModuleRE =
+  /\.(?:css|less|sass|scss|styl|stylus|pcss|postcss|sss)\?module(?:&.*)?$/
 const directRequestRE = /[?&]direct\b/
 const htmlProxyRE = /[?&]html-proxy\b/
 const htmlProxyIndexRE = /&index=(\d+)/
@@ -270,13 +271,13 @@ const cssModulesCache = new WeakMap<
   Map<string, Record<string, string>>
 >()
 
-export const removedPureCssFilesCache: WeakMap<
+export const removedPureCssFilesCache = new WeakMap<
   ResolvedConfig,
   Map<string, RenderedChunk>
-> = new WeakMap()
+>()
 
 // Used only if the config doesn't code-split CSS (builds a single CSS file)
-export const cssBundleNameCache: WeakMap<ResolvedConfig, string> = new WeakMap()
+export const cssBundleNameCache = new WeakMap<ResolvedConfig, string>()
 
 const postcssConfigCache = new WeakMap<
   ResolvedConfig,

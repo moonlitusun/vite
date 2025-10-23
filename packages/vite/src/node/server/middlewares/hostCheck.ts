@@ -1,6 +1,6 @@
 import { hostValidationMiddleware as originalHostValidationMiddleware } from 'host-validation-middleware'
-import type { Connect } from '#dep-types/connect'
 import type { ResolvedPreviewOptions, ResolvedServerOptions } from '../..'
+import type { Connect } from '#dep-types/connect'
 
 export function getAdditionalAllowedHosts(
   resolvedServerOptions: Pick<ResolvedServerOptions, 'host' | 'hmr' | 'origin'>,

@@ -9,8 +9,8 @@ const MODULE_RUNNER_SOURCEMAPPING_REGEXP = new RegExp(
 )
 
 export class EvaluatedModuleNode {
-  public importers: Set<string> = new Set()
-  public imports: Set<string> = new Set()
+  public importers = new Set<string>()
+  public imports = new Set<string>()
   public evaluated = false
   public meta: ResolvedResult | undefined
   public promise: Promise<any> | undefined
@@ -27,10 +27,10 @@ export class EvaluatedModuleNode {
 }
 
 export class EvaluatedModules {
-  public readonly idToModuleMap: Map<string, EvaluatedModuleNode> = new Map()
-  public readonly fileToModulesMap: Map<string, Set<EvaluatedModuleNode>> =
-    new Map()
-  public readonly urlToIdModuleMap: Map<string, EvaluatedModuleNode> = new Map()
+  public readonly idToModuleMap = new Map<string, EvaluatedModuleNode>()
+  public readonly fileToModulesMap =
+    new Map<string, Set<EvaluatedModuleNode>>()
+  public readonly urlToIdModuleMap = new Map<string, EvaluatedModuleNode>()
 
   /**
    * Returns the module node by the resolved module ID. Usually, module ID is

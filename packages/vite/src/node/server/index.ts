@@ -12,8 +12,6 @@ import colors from 'picocolors'
 import chokidar from 'chokidar'
 import launchEditorMiddleware from 'launch-editor-middleware'
 import type { SourceMap } from 'rollup'
-import type { FSWatcher, WatchOptions } from '#dep-types/chokidar'
-import type { Connect } from '#dep-types/connect'
 import type { ModuleRunner } from 'vite/module-runner'
 import type { CommonServerOptions } from '../http'
 import {
@@ -101,6 +99,8 @@ import { searchForPackageRoot, searchForWorkspaceRoot } from './searchRoot'
 import type { DevEnvironment } from './environment'
 import { hostValidationMiddleware } from './middlewares/hostCheck'
 import { rejectInvalidRequestMiddleware } from './middlewares/rejectInvalidRequest'
+import type { Connect } from '#dep-types/connect'
+import type { FSWatcher, WatchOptions } from '#dep-types/chokidar'
 
 const usedConfigs = new WeakSet<ResolvedConfig>()
 

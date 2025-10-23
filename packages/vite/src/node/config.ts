@@ -10,7 +10,6 @@ import colors from 'picocolors'
 import type { PluginContextMeta, RollupOptions } from 'rollup'
 import picomatch from 'picomatch'
 import { build } from 'esbuild'
-import type { Alias, AliasOptions } from '#dep-types/alias'
 import type { AnymatchFn } from '../types/anymatch'
 import { withTrailingSlash } from '../shared/utils'
 import {
@@ -111,6 +110,7 @@ import {
   basePluginContextMeta,
 } from './server/pluginContainer'
 import { nodeResolveWithVite } from './nodeResolve'
+import type { Alias, AliasOptions } from '#dep-types/alias'
 
 const debug = createDebugger('vite:config', { depth: 10 })
 const promisifiedRealpath = promisify(fs.realpath)

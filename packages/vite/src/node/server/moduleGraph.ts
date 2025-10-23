@@ -25,11 +25,11 @@ export class EnvironmentModuleNode {
   type: 'js' | 'css' | 'asset'
   info?: ModuleInfo
   meta?: Record<string, any>
-  importers: Set<EnvironmentModuleNode> = new Set()
+  importers = new Set<EnvironmentModuleNode>()
 
-  importedModules: Set<EnvironmentModuleNode> = new Set()
+  importedModules = new Set<EnvironmentModuleNode>()
 
-  acceptedHmrDeps: Set<EnvironmentModuleNode> = new Set()
+  acceptedHmrDeps = new Set<EnvironmentModuleNode>()
   acceptedHmrExports: Set<string> | null = null
   importedBindings: Map<string, Set<string>> | null = null
   isSelfAccepting?: boolean
@@ -90,19 +90,19 @@ export type ResolvedUrl = [
 export class EnvironmentModuleGraph {
   environment: string
 
-  urlToModuleMap: Map<string, EnvironmentModuleNode> = new Map()
-  idToModuleMap: Map<string, EnvironmentModuleNode> = new Map()
-  etagToModuleMap: Map<string, EnvironmentModuleNode> = new Map()
+  urlToModuleMap = new Map<string, EnvironmentModuleNode>()
+  idToModuleMap = new Map<string, EnvironmentModuleNode>()
+  etagToModuleMap = new Map<string, EnvironmentModuleNode>()
   // a single file may corresponds to multiple modules with different queries
-  fileToModulesMap: Map<string, Set<EnvironmentModuleNode>> = new Map()
+  fileToModulesMap = new Map<string, Set<EnvironmentModuleNode>>()
 
   /**
    * @internal
    */
-  _unresolvedUrlToModuleMap: Map<
+  _unresolvedUrlToModuleMap = new Map<
     string,
     EnvironmentModuleNode | Promise<EnvironmentModuleNode>
-  > = new Map()
+  >()
 
   /**
    * @internal
@@ -110,7 +110,7 @@ export class EnvironmentModuleGraph {
   _resolveId: (url: string) => Promise<PartialResolvedId | null>
 
   /** @internal */
-  _hasResolveFailedErrorModules: Set<EnvironmentModuleNode> = new Set()
+  _hasResolveFailedErrorModules = new Set<EnvironmentModuleNode>()
 
   constructor(
     environment: string,
@@ -165,7 +165,7 @@ export class EnvironmentModuleGraph {
 
   invalidateModule(
     mod: EnvironmentModuleNode,
-    seen: Set<EnvironmentModuleNode> = new Set(),
+    seen = new Set<EnvironmentModuleNode>(),
     timestamp: number = monotonicDateNow(),
     isHmr: boolean = false,
     /** @internal */

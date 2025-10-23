@@ -4,7 +4,6 @@ import sirv from 'sirv'
 import compression from '@polka/compression'
 import connect from 'connect'
 import corsMiddleware from 'cors'
-import type { Connect } from '#dep-types/connect'
 import type {
   HttpServer,
   ResolvedServerOptions,
@@ -46,6 +45,7 @@ import {
   basePluginContextMeta,
 } from './server/pluginContainer'
 import type { MinimalPluginContextWithoutEnvironment } from './plugin'
+import type { Connect } from '#dep-types/connect'
 
 export interface PreviewOptions extends CommonServerOptions {}
 

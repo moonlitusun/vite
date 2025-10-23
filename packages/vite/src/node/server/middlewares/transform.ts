@@ -2,7 +2,6 @@ import path from 'node:path'
 import fsp from 'node:fs/promises'
 import colors from 'picocolors'
 import type { ExistingRawSourceMap } from 'rollup'
-import type { Connect } from '#dep-types/connect'
 import type { ViteDevServer } from '..'
 import {
   createDebugger,
@@ -35,6 +34,7 @@ import {
 } from '../../../shared/constants'
 import type { ResolvedConfig } from '../../config'
 import { checkLoadingAccess, respondWithAccessDenied } from './static'
+import type { Connect } from '#dep-types/connect'
 
 const debugCache = createDebugger('vite:cache')
 

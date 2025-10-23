@@ -65,7 +65,6 @@ import type { RawSourceMap } from '@jridgewell/remapping'
 import { TraceMap, originalPositionFor } from '@jridgewell/trace-mapping'
 import MagicString from 'magic-string'
 import colors from 'picocolors'
-import type { FSWatcher } from '#dep-types/chokidar'
 import type { Plugin } from '../plugin'
 import {
   combineSourcemaps,
@@ -100,6 +99,7 @@ import type {
   EnvironmentModuleGraph,
   EnvironmentModuleNode,
 } from './moduleGraph'
+import type { FSWatcher } from '#dep-types/chokidar'
 
 // same default value of "moduleInfo.meta" as in Rollup
 const EMPTY_OBJECT = Object.freeze({})
@@ -185,7 +185,7 @@ class EnvironmentPluginContainer<Env extends Environment = Environment> {
   getSortedPlugins: PluginHookUtils['getSortedPlugins']
 
   moduleGraph: EnvironmentModuleGraph | undefined
-  watchFiles: Set<string> = new Set()
+  watchFiles = new Set<string>()
   minimalContext: MinimalPluginContext<Env>
 
   private _started = false
