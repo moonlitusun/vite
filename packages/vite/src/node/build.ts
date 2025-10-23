@@ -20,8 +20,6 @@ import type {
   WatcherOptions,
 } from 'rollup'
 import commonjsPlugin from '@rollup/plugin-commonjs'
-import type { RollupCommonJSOptions } from 'dep-types/commonjs'
-import type { RollupDynamicImportVarsOptions } from 'dep-types/dynamicImportVars'
 import type { TransformOptions } from 'esbuild'
 import {
   DEFAULT_ASSETS_INLINE_LIMIT,
@@ -71,6 +69,7 @@ import { getHookHandler } from './plugins'
 import { BaseEnvironment } from './baseEnvironment'
 import type { MinimalPluginContextWithoutEnvironment, Plugin } from './plugin'
 import type { RollupPluginHooks } from './typeUtils'
+import { type LicenseOptions, licensePlugin } from './plugins/license'
 import {
   BasicMinimalPluginContext,
   basePluginContextMeta,
@@ -81,6 +80,8 @@ import {
 } from './deprecations'
 import { prepareOutDirPlugin } from './plugins/prepareOutDir'
 import type { Environment } from './environment'
+import type { RollupDynamicImportVarsOptions } from '#dep-types/dynamicImportVars'
+import type { RollupCommonJSOptions } from '#dep-types/commonjs'
 
 export interface BuildEnvironmentOptions {
   /**
@@ -209,6 +210,12 @@ export interface BuildEnvironmentOptions {
    * @default true
    */
   copyPublicDir?: boolean
+  /**
+   * Whether to emit a `.vite/license.md` file that includes all bundled dependencies'
+   * licenses. Pass an object to customize the output file name.
+   * @default false
+   */
+  license?: boolean | LicenseOptions
   /**
    * Whether to emit a .vite/manifest.json in the output dir to map hash-less filenames
    * to their hashed versions. Useful when you want to generate your own HTML
@@ -354,7 +361,7 @@ export interface ResolvedBuildOptions
   modulePreload: false | ResolvedModulePreloadOptions
 }
 
-export const buildEnvironmentOptionsDefaults = Object.freeze({
+const _buildEnvironmentOptionsDefaults = Object.freeze({
   target: 'baseline-widely-available',
   /** @deprecated */
   polyfillModulePreload: true,
@@ -380,6 +387,7 @@ export const buildEnvironmentOptionsDefaults = Object.freeze({
   write: true,
   emptyOutDir: null,
   copyPublicDir: true,
+  license: false,
   manifest: false,
   lib: false,
   // ssr
@@ -390,7 +398,10 @@ export const buildEnvironmentOptionsDefaults = Object.freeze({
   chunkSizeWarningLimit: 500,
   watch: null,
   // createEnvironment
-})
+} satisfies BuildEnvironmentOptions)
+export const buildEnvironmentOptionsDefaults: Readonly<
+  Partial<BuildEnvironmentOptions>
+> = _buildEnvironmentOptionsDefaults
 
 export function resolveBuildEnvironmentOptions(
   raw: BuildEnvironmentOptions,
@@ -414,7 +425,7 @@ export function resolveBuildEnvironmentOptions(
 
   const merged = mergeWithDefaults(
     {
-      ...buildEnvironmentOptionsDefaults,
+      ..._buildEnvironmentOptionsDefaults,
       cssCodeSplit: !raw.lib,
       minify: consumer === 'server' ? false : 'esbuild',
       ssr: consumer === 'server',
@@ -492,7 +503,12 @@ export async function resolveBuildPlugins(config: ResolvedConfig): Promise<{
       buildEsbuildPlugin(),
       terserPlugin(config),
       ...(!config.isWorker
-        ? [manifestPlugin(), ssrManifestPlugin(), buildReporterPlugin(config)]
+        ? [
+            licensePlugin(),
+            manifestPlugin(),
+            ssrManifestPlugin(),
+            buildReporterPlugin(config),
+          ]
         : []),
       buildLoadFallbackPlugin(),
     ],
@@ -695,12 +711,11 @@ async function buildEnvironment(
 ): Promise<RollupOutput | RollupOutput[] | RollupWatcher> {
   const { logger, config } = environment
   const { root, build: options } = config
-  const ssr = config.consumer === 'server'
 
   logger.info(
     colors.cyan(
       `vite v${VERSION} ${colors.green(
-        `building ${ssr ? `SSR bundle ` : ``}for ${environment.config.mode}...`,
+        `building ${environment.name} environment for ${environment.config.mode}...`,
       )}`,
     ),
   )
@@ -726,7 +741,10 @@ async function buildEnvironment(
         logger,
       )
       const resolvedChokidarOptions = resolveChokidarOptions(
-        options.watch.chokidar,
+        {
+          ...(rollupOptions.watch || {}).chokidar,
+          ...options.watch.chokidar,
+        },
         resolvedOutDirs,
         emptyOutDir,
         environment.config.cacheDir,
@@ -736,6 +754,7 @@ async function buildEnvironment(
       const watcher = watch({
         ...rollupOptions,
         watch: {
+          ...rollupOptions.watch,
           ...options.watch,
           chokidar: resolvedChokidarOptions,
         },
@@ -1439,8 +1458,10 @@ export function toOutputFilePathWithoutRuntime(
   }
 }
 
-export const toOutputFilePathInCss = toOutputFilePathWithoutRuntime
-export const toOutputFilePathInHtml = toOutputFilePathWithoutRuntime
+export const toOutputFilePathInCss: typeof toOutputFilePathWithoutRuntime =
+  toOutputFilePathWithoutRuntime
+export const toOutputFilePathInHtml: typeof toOutputFilePathWithoutRuntime =
+  toOutputFilePathWithoutRuntime
 
 export class BuildEnvironment extends BaseEnvironment {
   mode = 'build' as const
@@ -1501,18 +1522,20 @@ export interface BuilderOptions {
   buildApp?: (builder: ViteBuilder) => Promise<void>
 }
 
-export const builderOptionsDefaults = Object.freeze({
+const _builderOptionsDefaults = Object.freeze({
   sharedConfigBuild: false,
   sharedPlugins: false,
   // buildApp
-})
+} satisfies BuilderOptions)
+export const builderOptionsDefaults: Readonly<Partial<BuilderOptions>> =
+  _builderOptionsDefaults
 
 export function resolveBuilderOptions(
   options: BuilderOptions | undefined,
 ): ResolvedBuilderOptions | undefined {
   if (!options) return
   return mergeWithDefaults(
-    { ...builderOptionsDefaults, buildApp: async () => {} },
+    { ..._builderOptionsDefaults, buildApp: async () => {} },
     options,
   )
 }
@@ -1601,6 +1624,7 @@ export async function createBuilder(
   if (useLegacyBuilder) {
     await setupEnvironment(config.build.ssr ? 'ssr' : 'client', config)
   } else {
+    const environmentConfigs: [string, ResolvedConfig][] = []
     for (const environmentName of Object.keys(config.environments)) {
       // We need to resolve the config again so we can properly merge options
       // and get a new set of plugins for each build environment. The ecosystem
@@ -1643,9 +1667,14 @@ export async function createBuilder(
           patchPlugins,
         )
       }
-
-      await setupEnvironment(environmentName, environmentConfig)
+      environmentConfigs.push([environmentName, environmentConfig])
     }
+    await Promise.all(
+      environmentConfigs.map(
+        async ([environmentName, environmentConfig]) =>
+          await setupEnvironment(environmentName, environmentConfig),
+      ),
+    )
   }
 
   return builder

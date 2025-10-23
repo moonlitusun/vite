@@ -20,6 +20,7 @@ import escapeHtml from 'escape-html'
 import type { MinimalPluginContextWithoutEnvironment, Plugin } from '../plugin'
 import type { ViteDevServer } from '../server'
 import {
+  decodeURIIfPossible,
   encodeURIPath,
   generateCodeFrame,
   getHash,
@@ -85,7 +86,13 @@ export const isHTMLRequest = (request: string): boolean =>
 // HTML Proxy Caches are stored by config -> filePath -> index
 export const htmlProxyMap = new WeakMap<
   ResolvedConfig,
-  Map<string, Array<{ code: string; map?: SourceMapInput }>>
+  Map<
+    string,
+    {
+      code: string
+      map?: SourceMapInput
+    }[]
+  >
 >()
 
 // HTML Proxy Transform result are stored by config
@@ -1567,13 +1574,4 @@ function serializeAttrs(attrs: HtmlTagDescriptor['attrs']): string {
 
 function incrementIndent(indent: string = '') {
   return `${indent}${indent[0] === '\t' ? '\t' : '  '}`
-}
-
-function decodeURIIfPossible(input: string): string | undefined {
-  try {
-    return decodeURI(input)
-  } catch {
-    // url is malformed, probably a interpolate syntax of template engines
-    return
-  }
 }

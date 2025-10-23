@@ -274,6 +274,7 @@ async function untilBrowserLog(
   expectOrder = true,
 ): Promise<string[]> {
   const { promise, resolve, reject } = promiseWithResolvers<void>()
+  let timeoutId: ReturnType<typeof setTimeout>
 
   const logs = []
 
@@ -322,12 +323,27 @@ async function untilBrowserLog(
       }
     }
 
+    timeoutId = setTimeout(() => {
+      const nextTarget = Array.isArray(target)
+        ? expectOrder
+          ? target[0]
+          : target.join(', ')
+        : target
+      reject(
+        new Error(
+          `Timeout waiting for browser logs. Waiting for: ${nextTarget}`,
+        ),
+      )
+      page.off('console', handleMsg)
+    }, 5000)
+
     page.on('console', handleMsg)
   } catch (err) {
     reject(err)
   }
 
   await promise
+  clearTimeout(timeoutId)
 
   return logs
 }
@@ -337,7 +353,11 @@ export const extractSourcemap = (content: string): any => {
   return fromComment(lines[lines.length - 1]).toObject()
 }
 
-export const formatSourcemapForSnapshot = (map: any, code: string): any => {
+export const formatSourcemapForSnapshot = (
+  map: any,
+  code: string,
+  withoutContent = false,
+): any => {
   const root = normalizePath(testDir)
   const m = { ...map }
   delete m.file
@@ -351,8 +371,8 @@ export const formatSourcemapForSnapshot = (map: any, code: string): any => {
   if (m.sourceRoot) {
     m.sourceRoot = m.sourceRoot.replace(root, '/root')
   }
-  const c = removeComments(code.replace(/\?v=[\da-f]{8}/, '?v=00000000'))
-  return { map: m, code: c, [sourcemapSnapshot]: true }
+  const c = removeComments(code.replace(/\?v=[\da-f]{8}/g, '?v=00000000'))
+  return { map: m, code: c, [sourcemapSnapshot]: { withoutContent } }
 }
 
 // helper function to kill process, uses taskkill on windows to ensure child process is killed too

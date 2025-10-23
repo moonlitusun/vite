@@ -101,7 +101,7 @@ export class EnvironmentModuleGraph {
    */
   _unresolvedUrlToModuleMap = new Map<
     string,
-    Promise<EnvironmentModuleNode> | EnvironmentModuleNode
+    EnvironmentModuleNode | Promise<EnvironmentModuleNode>
   >()
 
   /**

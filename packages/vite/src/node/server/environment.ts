@@ -1,4 +1,3 @@
-import type { FSWatcher } from 'dep-types/chokidar'
 import colors from 'picocolors'
 import type { FetchFunctionOptions, FetchResult } from 'vite/module-runner'
 import { BaseEnvironment } from '../baseEnvironment'
@@ -35,6 +34,7 @@ import {
 import { type WebSocketServer, isWebSocketServer } from './ws'
 import { warmupFiles } from './warmup'
 import { buildErrorMessage } from './middlewares/error'
+import type { FSWatcher } from '#dep-types/chokidar'
 
 export interface DevEnvironmentContext {
   hot: boolean
@@ -132,6 +132,9 @@ export class DevEnvironment extends BaseEnvironment {
     this.hot.setInvokeHandler({
       fetchModule: (id, importer, options) => {
         return this.fetchModule(id, importer, options)
+      },
+      getBuiltins: async () => {
+        return this.config.resolve.builtins
       },
     })
 
