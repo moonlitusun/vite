@@ -223,7 +223,9 @@ export function resolveCSSOptions(
   return resolved
 }
 
-const cssModuleRE = new RegExp(`\\.module${CSS_LANGS_RE.source}`)
+// const cssModuleRE = new RegExp(`\\.module${CSS_LANGS_RE.source}`)
+const cssModuleRE =
+  /\.(?:css|less|sass|scss|styl|stylus|pcss|postcss|sss)\?module(?:&.*)?$/
 const directRequestRE = /[?&]direct\b/
 const htmlProxyRE = /[?&]html-proxy\b/
 const htmlProxyIndexRE = /&index=(\d+)/
