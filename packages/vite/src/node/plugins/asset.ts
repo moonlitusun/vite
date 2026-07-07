@@ -1,14 +1,17 @@
 import path from 'node:path'
 import fsp from 'node:fs/promises'
 import { Buffer } from 'node:buffer'
+import { pathToFileURL } from 'node:url'
 import * as mrmime from 'mrmime'
 import type {
   NormalizedOutputOptions,
   PluginContext,
   RenderedChunk,
-} from 'rollup'
+} from 'rolldown'
 import MagicString from 'magic-string'
 import colors from 'picocolors'
+import picomatch from 'picomatch'
+import { makeIdFiltersToMatchWithQuery } from 'rolldown/filter'
 import {
   createToImportMetaURLBasedRelativeRuntime,
   toOutputFilePathInJS,
@@ -27,13 +30,18 @@ import {
   removeUrlQuery,
   urlRE,
 } from '../utils'
-import { DEFAULT_ASSETS_INLINE_LIMIT, FS_PREFIX } from '../constants'
+import {
+  DEFAULT_ASSETS_INLINE_LIMIT,
+  DEFAULT_ASSETS_RE,
+  FS_PREFIX,
+} from '../constants'
 import {
   cleanUrl,
   splitFileAndPostfix,
   withTrailingSlash,
 } from '../../shared/utils'
 import type { Environment } from '../environment'
+import type { PartialEnvironment } from '../baseEnvironment'
 
 // referenceId is base64url but replaces - with $
 export const assetUrlRE: RegExp = /__VITE_ASSET__([\w$]+)__(?:\$_(.*?)__)?/g
@@ -46,23 +54,23 @@ export const inlineRE: RegExp = /[?&]inline\b/
 const assetCache = new WeakMap<Environment, Map<string, string>>()
 
 /** a set of referenceId for entry CSS assets for each environment */
-export const cssEntriesMap = new WeakMap<
+export const cssEntriesMap: WeakMap<
   Environment,
-  Map<string, string>
->()
+  Map<string, { referenceId: string; name: string }>
+> = new WeakMap()
 
 // add own dictionary entry by directly assigning mrmime
 export function registerCustomMime(): void {
   // https://github.com/lukeed/mrmime/issues/3
   // instead of `image/vnd.microsoft.icon` which is registered on IANA Media Types DB
   // image/x-icon should be used instead for better compatibility (https://github.com/h5bp/html5-boilerplate/issues/219)
-  mrmime.mimes['ico'] = 'image/x-icon'
+  mrmime.mimes.ico = 'image/x-icon'
   // https://mimesniff.spec.whatwg.org/#matching-an-image-type-pattern
-  mrmime.mimes['cur'] = 'image/x-icon'
+  mrmime.mimes.cur = 'image/x-icon'
   // https://developer.mozilla.org/en-US/docs/Web/Media/Formats/Containers#flac
-  mrmime.mimes['flac'] = 'audio/flac'
+  mrmime.mimes.flac = 'audio/flac'
   // https://developer.mozilla.org/en-US/docs/Web/HTTP/Basics_of_HTTP/MIME_types/Common_types
-  mrmime.mimes['eot'] = 'application/vnd.ms-fontobject'
+  mrmime.mimes.eot = 'application/vnd.ms-fontobject'
 }
 
 export function renderAssetUrlInJS(
@@ -155,6 +163,15 @@ export function assetPlugin(config: ResolvedConfig): Plugin {
     },
 
     resolveId: {
+      filter: {
+        id: [
+          urlRE,
+          DEFAULT_ASSETS_RE,
+          ...makeIdFiltersToMatchWithQuery(config.rawAssetsInclude).map((v) =>
+            typeof v === 'string' ? picomatch.makeRe(v, { dot: true }) : v,
+          ),
+        ],
+      },
       handler(id) {
         if (!config.assetsInclude(cleanUrl(id)) && !urlRE.test(id)) {
           return
@@ -171,6 +188,12 @@ export function assetPlugin(config: ResolvedConfig): Plugin {
     load: {
       filter: {
         id: {
+          include: [
+            rawRE,
+            urlRE,
+            DEFAULT_ASSETS_RE,
+            ...makeIdFiltersToMatchWithQuery(config.rawAssetsInclude),
+          ],
           // Rollup convention, this id should be handled by the
           // plugin that marked it with \0
           exclude: /^\0/,
@@ -182,9 +205,13 @@ export function assetPlugin(config: ResolvedConfig): Plugin {
           const file = checkPublicFile(id, config) || cleanUrl(id)
           this.addWatchFile(file)
           // raw query, read file and return as string
-          return `export default ${JSON.stringify(
-            await fsp.readFile(file, 'utf-8'),
-          )}`
+          return {
+            code: `export default ${JSON.stringify(
+              await fsp.readFile(file, 'utf-8'),
+            )}`,
+            map: { mappings: '' },
+            moduleType: 'js', // NOTE: needs to be set to avoid double `export default` in `?raw&.txt`s
+          }
         }
 
         if (!urlRE.test(id) && !config.assetsInclude(cleanUrl(id))) {
@@ -211,24 +238,29 @@ export function assetPlugin(config: ResolvedConfig): Plugin {
               ? 'no-treeshake'
               : false,
           meta: config.command === 'build' ? { 'vite:asset': true } : undefined,
+          moduleType: 'js', // NOTE: needs to be set to avoid double `export default` in `.txt`s
         }
       },
     },
 
-    renderChunk(code, chunk, opts) {
-      const s = renderAssetUrlInJS(this, chunk, opts, code)
+    ...(config.command === 'build'
+      ? {
+          renderChunk(code, chunk, opts) {
+            const s = renderAssetUrlInJS(this, chunk, opts, code)
 
-      if (s) {
-        return {
-          code: s.toString(),
-          map: this.environment.config.build.sourcemap
-            ? s.generateMap({ hires: 'boundary' })
-            : null,
+            if (s) {
+              return {
+                code: s.toString(),
+                map: this.environment.config.build.sourcemap
+                  ? s.generateMap({ hires: 'boundary' })
+                  : null,
+              }
+            } else {
+              return null
+            }
+          },
         }
-      } else {
-        return null
-      }
-    },
+      : {}),
 
     generateBundle(_, bundle) {
       // Remove empty entry point file
@@ -278,16 +310,21 @@ export function assetPlugin(config: ResolvedConfig): Plugin {
         }
       }
     },
+
+    watchChange(id) {
+      assetCache.get(this.environment)?.delete(normalizePath(id))
+    },
   }
 }
 
 export async function fileToUrl(
   pluginContext: PluginContext,
   id: string,
+  asFileUrl = false,
 ): Promise<string> {
   const { environment } = pluginContext
-  if (environment.config.command === 'serve') {
-    return fileToDevUrl(environment, id)
+  if (!environment.config.isBundled) {
+    return fileToDevUrl(environment, id, asFileUrl)
   } else {
     return fileToBuiltUrl(pluginContext, id)
   }
@@ -296,7 +333,7 @@ export async function fileToUrl(
 export async function fileToDevUrl(
   environment: Environment,
   id: string,
-  skipBase = false,
+  asFileUrl = false,
 ): Promise<string> {
   const config = environment.getTopLevelConfig()
   const publicFile = checkPublicFile(id, config)
@@ -319,6 +356,10 @@ export async function fileToDevUrl(
     }
   }
 
+  if (asFileUrl) {
+    return pathToFileURL(cleanedId).href
+  }
+
   let rtn: string
   if (publicFile) {
     // in public dir during dev, keep the url as-is
@@ -330,9 +371,6 @@ export async function fileToDevUrl(
     // outside of project root, use absolute fs path
     // (this is special handled by the serve static middleware
     rtn = path.posix.join(FS_PREFIX, id)
-  }
-  if (skipBase) {
-    return rtn
   }
   const base = joinUrlSegments(config.server.origin ?? '', config.decodedBase)
   return joinUrlSegments(base, removeLeadingSlash(rtn))
@@ -346,10 +384,10 @@ export function getPublicAssetFilename(
 }
 
 // inner map: hash -> url
-export const publicAssetUrlCache = new WeakMap<
+export const publicAssetUrlCache: WeakMap<
   ResolvedConfig,
   Map<string, string>
->()
+> = new WeakMap()
 
 export const publicAssetUrlRE: RegExp = /__VITE_PUBLIC_ASSET__([a-z\d]{8})__/g
 
@@ -435,11 +473,40 @@ async function fileToBuiltUrl(
       postfix = postfix.replace(noInlineRE, '').replace(/^&/, '?')
     }
 
-    url = `__VITE_ASSET__${referenceId}__${postfix ? `$_${postfix}__` : ``}`
+    if (
+      environment.config.command === 'serve' &&
+      environment.config.isBundled
+    ) {
+      const outputFilename = pluginContext.getFileName(referenceId)
+      url = toOutputFilePathInJSForBundledDev(environment, outputFilename)
+    } else {
+      url = `__VITE_ASSET__${referenceId}__${postfix ? `$_${postfix}__` : ``}`
+    }
   }
 
   cache.set(id, url)
   return url
+}
+
+export function toOutputFilePathInJSForBundledDev(
+  environment: PartialEnvironment,
+  filename: string,
+): string {
+  const outputUrl = toOutputFilePathInJS(
+    environment,
+    filename,
+    'asset',
+    // in bundled dev, the chunks are always emitted to `assets` directory
+    'assets/dummy.js',
+    'js',
+    // relative base is not supported in bundled dev
+    () => {
+      throw new Error('unreachable')
+    },
+  )
+  // renderBuiltUrl is not supported in bundled dev
+  if (typeof outputUrl === 'object') throw new Error('unreachable')
+  return outputUrl
 }
 
 export async function urlToBuiltUrl(

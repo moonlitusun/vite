@@ -101,12 +101,6 @@ test("don't add extension to directory name (./dir-with-ext.js/index.js)", async
   expect(await page.textContent('.dir-with-ext')).toMatch('[success]')
 })
 
-test('do not resolve to the `module` field if the importer is a `require` call', async () => {
-  expect(await page.textContent('.require-pkg-with-module-field')).toMatch(
-    '[success]',
-  )
-})
-
 test('a ts module can import another ts module using its corresponding js file name', async () => {
   expect(await page.textContent('.ts-extension')).toMatch('[success]')
 })
@@ -139,14 +133,6 @@ test('Resolve browser field even if module field exists', async () => {
   expect(await page.textContent('.browser-module1')).toMatch('[success]')
 })
 
-test('Resolve module field if browser field is likely UMD or CJS', async () => {
-  expect(await page.textContent('.browser-module2')).toMatch('[success]')
-})
-
-test('Resolve module field if browser field is likely IIFE', async () => {
-  expect(await page.textContent('.browser-module3')).toMatch('[success]')
-})
-
 test('css entry', async () => {
   expect(await page.textContent('.css')).toMatch('[success]')
 })
@@ -157,6 +143,10 @@ test('monorepo linked dep', async () => {
 
 test('plugin resolved virtual file', async () => {
   expect(await page.textContent('.virtual')).toMatch('[success]')
+})
+
+test('plugin resolved virtual file that has import', async () => {
+  expect(await page.textContent('.virtual-has-import')).toMatch('[success]')
 })
 
 test('plugin resolved custom virtual file', async () => {
@@ -191,7 +181,7 @@ test('resolve.conditions', async () => {
 
 test('resolve package that contains # in path', async () => {
   expect(await page.textContent('.path-contains-sharp-symbol')).toMatch(
-    '[success] true #',
+    '[success] ok ok ok',
   )
 })
 
@@ -230,6 +220,12 @@ test('Resolving with query with imports field', async () => {
 
 test('Resolving dot-prefixed directory with imports field', async () => {
   expect(await page.textContent('.imports-dot-prefixed')).toMatch('[success]')
+})
+
+test('Resolving #/ root alias pattern with imports field', async () => {
+  // This tests the new Node.js behavior from https://github.com/nodejs/node/pull/60864
+  // which allows "#/*" patterns (slash immediately after #) in package.json imports
+  expect(await page.textContent('.imports-root-slash')).toMatch('[success]')
 })
 
 test("Resolve doesn't interrupt page request with trailing query and .css", async () => {

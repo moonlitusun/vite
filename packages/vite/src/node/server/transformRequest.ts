@@ -4,7 +4,12 @@ import { performance } from 'node:perf_hooks'
 import getEtag from 'etag'
 import MagicString from 'magic-string'
 import { init, parse as parseImports } from 'es-module-lexer'
-import type { PartialResolvedId, SourceDescription, SourceMap } from 'rollup'
+import type {
+  ModuleType,
+  PartialResolvedId,
+  SourceDescription,
+  SourceMap,
+} from 'rolldown'
 import colors from 'picocolors'
 import type { EnvironmentModuleNode } from '../server/moduleGraph'
 import {
@@ -30,6 +35,7 @@ import {
 import { isFileLoadingAllowed } from './middlewares/static'
 import { throwClosedServerError } from './pluginContainer'
 import type { DevEnvironment } from './environment'
+import { isServerAccessDeniedForTransform } from './middlewares/transform'
 
 export const ERR_LOAD_URL = 'ERR_LOAD_URL'
 export const ERR_LOAD_PUBLIC_URL = 'ERR_LOAD_PUBLIC_URL'
@@ -55,11 +61,11 @@ export interface TransformOptions {
   ssr?: boolean
 }
 
-export interface TransformOptionsInternal {
+interface TransformOptionsInternal {
   /**
-   * @internal
+   * Whether to skip the `server.fs` check.
    */
-  allowId?: (id: string) => boolean
+  skipFsCheck: boolean
 }
 
 // TODO: This function could be moved to the DevEnvironment class.
@@ -72,7 +78,7 @@ export interface TransformOptionsInternal {
 export function transformRequest(
   environment: DevEnvironment,
   url: string,
-  options: TransformOptionsInternal = {},
+  options: TransformOptionsInternal,
 ): Promise<TransformResult | null> {
   if (environment._closing && environment.config.dev.recoverable)
     throwClosedServerError()
@@ -243,7 +249,11 @@ async function loadAndTransform(
 
   const moduleGraph = environment.moduleGraph
 
-  if (options.allowId && !options.allowId(id)) {
+  if (
+    !options.skipFsCheck &&
+    id[0] !== '\0' &&
+    isServerAccessDeniedForTransform(config, id)
+  ) {
     const err: any = new Error(`Denied ID ${id}`)
     err.code = ERR_DENIED_ID
     err.id = id
@@ -252,6 +262,7 @@ async function loadAndTransform(
 
   let code: string | null = null
   let map: SourceDescription['map'] = null
+  let moduleType: ModuleType | undefined
 
   // load
   const loadStart = debugLoad ? performance.now() : 0
@@ -266,7 +277,7 @@ async function loadAndTransform(
     // only try the fallback if access is allowed, skip for out of root url
     // like /service-worker.js or /api/users
     if (
-      environment.config.consumer === 'server' ||
+      options.skipFsCheck ||
       isFileLoadingAllowed(environment.getTopLevelConfig(), slash(file))
     ) {
       try {
@@ -287,7 +298,7 @@ async function loadAndTransform(
     }
     if (code) {
       try {
-        const extracted = await extractSourcemapFromFile(code, file)
+        const extracted = extractSourcemapFromFile(code, file, logger)
         if (extracted) {
           code = extracted.code
           map = extracted.map
@@ -303,6 +314,7 @@ async function loadAndTransform(
     if (isObject(loadResult)) {
       code = loadResult.code
       map = loadResult.map
+      moduleType = loadResult.moduleType
     } else {
       code = loadResult
     }
@@ -328,6 +340,12 @@ async function loadAndTransform(
     err.code = isPublicFile ? ERR_LOAD_PUBLIC_URL : ERR_LOAD_URL
     throw err
   }
+  if (moduleType === undefined) {
+    const guessedModuleType = getModuleTypeFromId(id)
+    if (guessedModuleType && guessedModuleType !== 'js') {
+      moduleType = guessedModuleType
+    }
+  }
 
   if (environment._closing && environment.config.dev.recoverable)
     throwClosedServerError()
@@ -339,6 +357,7 @@ async function loadAndTransform(
   const transformStart = debugTransform ? performance.now() : 0
   const transformResult = await pluginContainer.transform(code, id, {
     inMap: map,
+    moduleType,
   })
   const originalCode = code
   if (transformResult.code === originalCode) {
@@ -516,4 +535,31 @@ async function handleModuleSoftInvalidation(
     environment.moduleGraph.updateModuleTransformResult(mod, result)
 
   return result
+}
+
+// https://github.com/rolldown/rolldown/blob/cc66f4b7189dfb3a248608d02f5962edb09b11f8/crates/rolldown/src/utils/normalize_options.rs#L95-L111
+const defaultModuleTypes: Record<string, ModuleType | undefined> = {
+  js: 'js',
+  mjs: 'js',
+  cjs: 'js',
+  jsx: 'jsx',
+  ts: 'ts',
+  mts: 'ts',
+  cts: 'ts',
+  tsx: 'tsx',
+  json: 'json',
+  txt: 'text',
+  css: 'css',
+}
+
+// https://github.com/rolldown/rolldown/blob/bf53a100edf1780d5a5aa41f0bc0459c5696543e/crates/rolldown/src/utils/load_source.rs#L53-L89
+export function getModuleTypeFromId(id: string): ModuleType | undefined {
+  let pos = -1
+  while ((pos = id.indexOf('.', pos + 1)) >= 0) {
+    const ext = id.slice(pos + 1)
+    const moduleType = defaultModuleTypes[ext]
+    if (moduleType) {
+      return moduleType
+    }
+  }
 }

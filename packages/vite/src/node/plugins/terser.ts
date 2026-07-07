@@ -1,13 +1,13 @@
 import { pathToFileURL } from 'node:url'
 import { WorkerWithFallback } from 'artichokie'
-import type { Plugin } from '../plugin'
-import type { ResolvedConfig } from '..'
-import { _dirname, generateCodeFrame } from '../utils'
-import { nodeResolveWithVite } from '../nodeResolve'
 import type {
   TerserMinifyOptions,
   TerserMinifyOutput,
 } from '#types/internal/terserOptions'
+import type { Plugin } from '../plugin'
+import type { ResolvedConfig } from '..'
+import { _dirname, generateCodeFrame } from '../utils'
+import { nodeResolveWithVite } from '../nodeResolve'
 
 export interface TerserOptions extends TerserMinifyOptions {
   /**
@@ -88,8 +88,7 @@ export function terserPlugin(config: ResolvedConfig): Plugin {
       // can use terser.
       if (
         config.build.minify !== 'terser' &&
-        // @ts-expect-error injected by @vitejs/plugin-legacy
-        !outputOptions.__vite_force_terser__
+        !this.environment.config.isOutputOptionsForLegacyChunks?.(outputOptions)
       ) {
         return null
       }

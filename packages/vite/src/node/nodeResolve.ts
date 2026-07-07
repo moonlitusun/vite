@@ -1,7 +1,7 @@
+import isModuleSyncConditionEnabled from '#module-sync-enabled'
 import { DEFAULT_EXTENSIONS } from './constants'
 import { tryNodeResolve } from './plugins/resolve'
 import { nodeLikeBuiltins } from './utils'
-import isModuleSyncConditionEnabled from '#module-sync-enabled'
 
 export interface NodeResolveWithViteOptions {
   root: string
@@ -33,6 +33,7 @@ export function nodeResolveWithVite(
     dedupe: [],
     extensions: DEFAULT_EXTENSIONS,
     preserveSymlinks: false,
+    tsconfigPaths: false,
     // Intentionally disable package cache for now as consumers don't need it
     packageCache: undefined,
     isRequire: options.isRequire,

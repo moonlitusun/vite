@@ -1,12 +1,19 @@
+import { nanoid } from 'nanoid/non-secure'
+import type {
+  DevRuntime as DevRuntimeType,
+  Messenger,
+} from 'rolldown/experimental/runtime-types'
+import type { ErrorPayload, HotPayload } from '#types/hmrPayload'
+import type { ViteHotContext } from '#types/hot'
 import { HMRClient, HMRContext } from '../shared/hmr'
 import {
   createWebSocketModuleRunnerTransport,
   normalizeModuleRunnerTransport,
 } from '../shared/moduleRunnerTransport'
 import { createHMRHandler } from '../shared/hmrHandler'
+import { setupForwardConsoleHandler } from '../shared/forwardConsole'
 import { ErrorOverlay, cspNonce, overlayId } from './overlay'
-import type { ViteHotContext } from '#types/hot'
-import type { ErrorPayload, HotPayload } from '#types/hmrPayload'
+// @ts-expect-error internal virtual module
 import '@vite/env'
 
 // injected by the hmr plugin when served
@@ -20,6 +27,8 @@ declare const __HMR_BASE__: string
 declare const __HMR_TIMEOUT__: number
 declare const __HMR_ENABLE_OVERLAY__: boolean
 declare const __WS_TOKEN__: string
+declare const __SERVER_FORWARD_CONSOLE__: any
+declare const __BUNDLED_DEV__: boolean
 
 console.debug('[vite] connecting...')
 
@@ -37,6 +46,8 @@ const directSocketHost = __HMR_DIRECT_TARGET__
 const base = __BASE__ || '/'
 const hmrTimeout = __HMR_TIMEOUT__
 const wsToken = __WS_TOKEN__
+const isBundleMode = __BUNDLED_DEV__
+const forwardConsole = __SERVER_FORWARD_CONSOLE__
 
 const transport = normalizeModuleRunnerTransport(
   (() => {
@@ -140,34 +151,57 @@ const hmrClient = new HMRClient(
     debug: (...msg) => console.debug('[vite]', ...msg),
   },
   transport,
-  async function importUpdatedModule({
-    acceptedPath,
-    timestamp,
-    explicitImportRequired,
-    isWithinCircularImport,
-  }) {
-    const [acceptedPathWithoutQuery, query] = acceptedPath.split(`?`)
-    const importPromise = import(
-      /* @vite-ignore */
-      base +
-        acceptedPathWithoutQuery.slice(1) +
-        `?${explicitImportRequired ? 'import&' : ''}t=${timestamp}${
-          query ? `&${query}` : ''
-        }`
-    )
-    if (isWithinCircularImport) {
-      importPromise.catch(() => {
-        console.info(
-          `[hmr] ${acceptedPath} failed to apply HMR as it's within a circular import. Reloading page to reset the execution order. ` +
-            `To debug and break the circular import, you can run \`vite --debug hmr\` to log the circular dependency path if a file change triggered it.`,
+  isBundleMode
+    ? async function importUpdatedModule({
+        url,
+        acceptedPath,
+        isWithinCircularImport,
+      }) {
+        const importPromise = import(base + url!).then(() =>
+          // @ts-expect-error globalThis.__rolldown_runtime__
+          globalThis.__rolldown_runtime__.loadExports(acceptedPath),
         )
-        pageReload()
-      })
-    }
-    return await importPromise
-  },
+        if (isWithinCircularImport) {
+          importPromise.catch(() => {
+            console.info(
+              `[hmr] ${acceptedPath} failed to apply HMR as it's within a circular import. Reloading page to reset the execution order. ` +
+                `To debug and break the circular import, you can run \`vite --debug hmr\` to log the circular dependency path if a file change triggered it.`,
+            )
+            pageReload()
+          })
+        }
+        return await importPromise
+      }
+    : async function importUpdatedModule({
+        acceptedPath,
+        timestamp,
+        explicitImportRequired,
+        isWithinCircularImport,
+      }) {
+        const [acceptedPathWithoutQuery, query] = acceptedPath.split(`?`)
+        const importPromise = import(
+          /* @vite-ignore */
+          base +
+            acceptedPathWithoutQuery.slice(1) +
+            `?${explicitImportRequired ? 'import&' : ''}t=${timestamp}${
+              query ? `&${query}` : ''
+            }`
+        )
+        if (isWithinCircularImport) {
+          importPromise.catch(() => {
+            console.info(
+              `[hmr] ${acceptedPath} failed to apply HMR as it's within a circular import. Reloading page to reset the execution order. ` +
+                `To debug and break the circular import, you can run \`vite --debug hmr\` to log the circular dependency path if a file change triggered it.`,
+            )
+            pageReload()
+          })
+        }
+        return await importPromise
+      },
 )
 transport.connect!(createHMRHandler(handleMessage))
+
+setupForwardConsoleHandler(transport, forwardConsole)
 
 async function handleMessage(payload: HotPayload) {
   switch (payload.type) {
@@ -363,7 +397,7 @@ function waitForSuccessfulPing(socketUrl: string) {
       document.removeEventListener('visibilitychange', onVisibilityChange)
       sharedWorker.port.close()
 
-      const data: { type: 'success' } | { type: 'error'; error: unknown } =
+      const data: { type: 'success' } | { type: 'error'; error: Error } =
         event.data
       if (data.type === 'error') {
         reject(data.error)
@@ -554,13 +588,9 @@ export function removeStyle(id: string): void {
     // re-select elements since HMR can replace links
     document
       .querySelectorAll<HTMLLinkElement>(
-        `link[rel="stylesheet"][data-vite-dev-id]`,
+        `link[rel="stylesheet"][data-vite-dev-id="${CSS.escape(id)}"]`,
       )
-      .forEach((el) => {
-        if (el.getAttribute('data-vite-dev-id') === id) {
-          el.remove()
-        }
-      })
+      .forEach((el) => el.remove())
     linkSheetsMap.delete(id)
   }
   const style = sheetsMap.get(id)
@@ -593,3 +623,51 @@ export function injectQuery(url: string, queryToInject: string): string {
 }
 
 export { ErrorOverlay }
+
+declare const DevRuntime: typeof DevRuntimeType
+
+if (isBundleMode && typeof DevRuntime !== 'undefined') {
+  class ViteDevRuntime extends DevRuntime {
+    override createModuleHotContext(moduleId: string) {
+      const ctx = createHotContext(moduleId)
+      // @ts-expect-error TODO: support CSS properly
+      ctx._internal = { updateStyle, removeStyle }
+      return ctx
+    }
+
+    override applyUpdates(_boundaries: [string, string][]): void {
+      // noop, handled in the HMR client
+    }
+  }
+
+  const clientId = nanoid()
+
+  // notify client id
+  transport.send({
+    type: 'custom',
+    event: 'vite:module-loaded',
+    data: { modules: [], clientId },
+  })
+
+  const wrappedSocket: Messenger = {
+    send(message) {
+      switch (message.type) {
+        case 'hmr:module-registered': {
+          transport.send({
+            type: 'custom',
+            event: 'vite:module-loaded',
+            // clone array as the runtime reuses the array instance
+            data: { modules: message.modules.slice(), clientId },
+          })
+          break
+        }
+        default:
+          throw new Error(`Unknown message type: ${JSON.stringify(message)}`)
+      }
+    },
+  }
+  ;(globalThis as any).__rolldown_runtime__ ??= new ViteDevRuntime(
+    wrappedSocket,
+    clientId,
+  )
+}

@@ -5,22 +5,21 @@ import type {
   ModuleRunnerHmr,
   ModuleRunnerOptions,
 } from 'vite/module-runner'
+import type { HotPayload } from '#types/hmrPayload'
 import type { DevEnvironment } from '../../server/environment'
 import type {
   HotChannelClient,
   NormalizedServerHotChannel,
 } from '../../server/hmr'
 import type { ModuleRunnerTransport } from '../../../shared/moduleRunnerTransport'
-import type { HotPayload } from '#types/hmrPayload'
 
 /**
  * @experimental
  */
-export interface ServerModuleRunnerOptions
-  extends Omit<
-    ModuleRunnerOptions,
-    'root' | 'fetchModule' | 'hmr' | 'transport'
-  > {
+export interface ServerModuleRunnerOptions extends Omit<
+  ModuleRunnerOptions,
+  'root' | 'fetchModule' | 'hmr' | 'transport'
+> {
   /**
    * Disable HMR or configure HMR logger.
    */
@@ -43,8 +42,21 @@ function createHMROptions(
     return false
   }
   if (!('api' in environment.hot)) return false
+
+  const defaultLogger: ModuleRunnerHmr['logger'] = {
+    debug: (...msg) =>
+      environment.logger.info(msg.join(' '), {
+        timestamp: true,
+      }),
+    error: (err) =>
+      environment.logger.error(
+        err instanceof Error ? err.message : String(err),
+        { timestamp: true },
+      ),
+  }
+
   return {
-    logger: options.hmr?.logger,
+    logger: options.hmr?.logger ?? defaultLogger,
   }
 }
 
@@ -91,6 +103,11 @@ export const createServerModuleRunnerTransport = (options: {
   return {
     connect({ onMessage }) {
       options.channel.api!.outsideEmitter.on('send', onMessage)
+      options.channel.api!.innerEmitter.emit(
+        'vite:client:connect',
+        undefined,
+        hmrClient,
+      )
       onMessage({ type: 'connected' })
       handler = onMessage
     },
@@ -98,6 +115,11 @@ export const createServerModuleRunnerTransport = (options: {
       if (handler) {
         options.channel.api!.outsideEmitter.off('send', handler)
       }
+      options.channel.api!.innerEmitter.emit(
+        'vite:client:disconnect',
+        undefined,
+        hmrClient,
+      )
     },
     send(payload) {
       if (payload.type !== 'custom') {

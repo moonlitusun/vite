@@ -33,26 +33,28 @@ import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import { join } from 'node:path'
 import { performance } from 'node:perf_hooks'
-import { parseAst as rollupParseAst } from 'rollup/parseAst'
+import { parseAst as rolldownParseAst } from 'rolldown/parseAst'
+import type { ESTree } from 'rolldown/utils'
 import type {
   AsyncPluginHooks,
   CustomPluginOptions,
   EmittedFile,
   FunctionPluginHooks,
+  ImportKind,
   InputOptions,
   LoadResult,
   ModuleInfo,
   ModuleOptions,
+  ModuleType,
   NormalizedInputOptions,
   OutputOptions,
   ParallelPluginHooks,
   PartialNull,
   PartialResolvedId,
   PluginContextMeta,
-  ProgramNode,
   ResolvedId,
   RollupError,
-  RollupFsModule,
+  RolldownFsModule as RollupFsModule,
   RollupLog,
   MinimalPluginContext as RollupMinimalPluginContext,
   PluginContext as RollupPluginContext,
@@ -60,11 +62,12 @@ import type {
   SourceDescription,
   SourceMap,
   TransformResult,
-} from 'rollup'
+} from 'rolldown'
 import type { RawSourceMap } from '@jridgewell/remapping'
 import { TraceMap, originalPositionFor } from '@jridgewell/trace-mapping'
 import MagicString from 'magic-string'
 import colors from 'picocolors'
+import type { FSWatcher } from '#dep-types/chokidar'
 import type { Plugin } from '../plugin'
 import {
   combineSourcemaps,
@@ -76,6 +79,7 @@ import {
   normalizePath,
   numberToPos,
   prettifyUrl,
+  rolldownVersion,
   rollupVersion,
   timeFrom,
 } from '../utils'
@@ -99,7 +103,6 @@ import type {
   EnvironmentModuleGraph,
   EnvironmentModuleNode,
 } from './moduleGraph'
-import type { FSWatcher } from '#dep-types/chokidar'
 
 // same default value of "moduleInfo.meta" as in Rollup
 const EMPTY_OBJECT = Object.freeze({})
@@ -158,7 +161,7 @@ export async function createEnvironmentPluginContainer<
     watcher,
     autoStart,
   )
-  await container.resolveRollupOptions()
+  await container.resolveRolldownOptions()
   return container
 }
 
@@ -171,7 +174,7 @@ export type SkipInformation = {
 
 class EnvironmentPluginContainer<Env extends Environment = Environment> {
   private _pluginContextMap = new Map<Plugin, PluginContext>()
-  private _resolvedRollupOptions?: InputOptions
+  private _resolvedRolldownOptions?: InputOptions
   private _processesing = new Set<Promise<any>>()
   private _seenResolves: Record<string, true | undefined> = {}
 
@@ -185,7 +188,7 @@ class EnvironmentPluginContainer<Env extends Environment = Environment> {
   getSortedPlugins: PluginHookUtils['getSortedPlugins']
 
   moduleGraph: EnvironmentModuleGraph | undefined
-  watchFiles = new Set<string>()
+  watchFiles: Set<string> = new Set()
   minimalContext: MinimalPluginContext<Env>
 
   private _started = false
@@ -270,12 +273,12 @@ class EnvironmentPluginContainer<Env extends Environment = Environment> {
   }
 
   get options(): InputOptions {
-    return this._resolvedRollupOptions!
+    return this._resolvedRolldownOptions!
   }
 
-  async resolveRollupOptions(): Promise<InputOptions> {
-    if (!this._resolvedRollupOptions) {
-      let options = this.environment.config.build.rollupOptions
+  async resolveRolldownOptions(): Promise<InputOptions> {
+    if (!this._resolvedRolldownOptions) {
+      let options = this.environment.config.build.rolldownOptions
       for (const optionsHook of this.getSortedPluginHooks('options')) {
         if (this._closed) {
           throwClosedServerError()
@@ -285,9 +288,9 @@ class EnvironmentPluginContainer<Env extends Environment = Environment> {
             optionsHook.call(this.minimalContext, options),
           )) || options
       }
-      this._resolvedRollupOptions = options
+      this._resolvedRolldownOptions = options
     }
-    return this._resolvedRollupOptions
+    return this._resolvedRolldownOptions
   }
 
   private _getPluginContext(plugin: Plugin) {
@@ -353,6 +356,7 @@ class EnvironmentPluginContainer<Env extends Environment = Environment> {
       'index.html',
     ),
     options?: {
+      kind?: ImportKind
       attributes?: Record<string, string>
       custom?: CustomPluginOptions
       /** @deprecated use `skipCalls` instead */
@@ -397,6 +401,7 @@ class EnvironmentPluginContainer<Env extends Environment = Environment> {
       ctx._plugin = plugin
 
       const normalizedOptions = {
+        kind: options?.kind,
         attributes: options?.attributes ?? {},
         custom: options?.custom,
         isEntry: !!options?.isEntry,
@@ -526,11 +531,18 @@ class EnvironmentPluginContainer<Env extends Environment = Environment> {
     id: string,
     options?: {
       inMap?: SourceDescription['map']
+      moduleType?: string
     },
-  ): Promise<{ code: string; map: SourceMap | { mappings: '' } | null }> {
+  ): Promise<{
+    code: string
+    map: SourceMap | { mappings: '' } | null
+    moduleType?: ModuleType
+  }> {
     let ssr = this.environment.config.consumer === 'server'
     const topLevelConfig = this.environment.getTopLevelConfig()
-    const optionsWithSSR = options ? { ...options, ssr } : { ssr }
+    const optionsWithSSR = options
+      ? { ...options, ssr, moduleType: options.moduleType ?? 'js' }
+      : { ssr, moduleType: 'js' }
     const inMap = options?.inMap
 
     const ctx = new TransformPluginContext(this, id, code, inMap as SourceMap)
@@ -541,7 +553,7 @@ class EnvironmentPluginContainer<Env extends Environment = Environment> {
         throwClosedServerError()
 
       const filter = getCachedFilterForPlugin(plugin, 'transform')
-      if (filter && !filter(id, code)) continue
+      if (filter && !filter(id, code, optionsWithSSR.moduleType)) continue
 
       if (
         isFutureDeprecationEnabled(
@@ -583,7 +595,7 @@ class EnvironmentPluginContainer<Env extends Environment = Environment> {
       )
       if (isObject(result)) {
         if (result.code !== undefined) {
-          code = result.code
+          code = result.code as string
           if (result.map) {
             if (debugSourcemapCombine) {
               // @ts-expect-error inject plugin name for debug purpose
@@ -591,6 +603,9 @@ class EnvironmentPluginContainer<Env extends Environment = Environment> {
             }
             ctx.sourcemapChain.push(result.map)
           }
+        }
+        if (result.moduleType !== undefined) {
+          optionsWithSSR.moduleType = result.moduleType
         }
         ctx._updateModuleInfo(id, result)
       } else {
@@ -600,6 +615,7 @@ class EnvironmentPluginContainer<Env extends Environment = Environment> {
     return {
       code,
       map: ctx._getCombinedSourcemap(),
+      moduleType: optionsWithSSR.moduleType,
     }
   }
 
@@ -607,10 +623,15 @@ class EnvironmentPluginContainer<Env extends Environment = Environment> {
     id: string,
     change: { event: 'create' | 'update' | 'delete' },
   ): Promise<void> {
+    const config = this.environment.getTopLevelConfig()
     await this.hookParallel(
       'watchChange',
       (plugin) => this._getPluginContext(plugin),
       () => [id, change],
+      (plugin) =>
+        this.environment.name === 'client' ||
+        config.server.perEnvironmentWatchChangeDuringDev ||
+        plugin.perEnvironmentWatchChangeDuringDev,
     )
   }
 
@@ -639,9 +660,11 @@ class EnvironmentPluginContainer<Env extends Environment = Environment> {
 export const basePluginContextMeta: {
   viteVersion: string
   rollupVersion: string
+  rolldownVersion: string
 } = {
   viteVersion,
   rollupVersion,
+  rolldownVersion,
 }
 
 export class BasicMinimalPluginContext<Meta = PluginContextMeta> {
@@ -649,6 +672,12 @@ export class BasicMinimalPluginContext<Meta = PluginContextMeta> {
     public meta: Meta,
     private _logger: Logger,
   ) {}
+
+  // FIXME: properly support this later
+  // eslint-disable-next-line @typescript-eslint/class-literal-property-style
+  get pluginName(): string {
+    return ''
+  }
 
   debug(rawLog: string | RollupLog | (() => string | RollupLog)): void {
     const log = this._normalizeRawLog(rawLog)
@@ -723,6 +752,10 @@ class PluginContext
   _resolveSkips?: Set<Plugin>
   _resolveSkipCalls?: readonly SkipInformation[]
 
+  override get pluginName(): string {
+    return this._plugin.name
+  }
+
   constructor(
     public _plugin: Plugin,
     public _container: EnvironmentPluginContainer,
@@ -732,8 +765,8 @@ class PluginContext
 
   fs: RollupFsModule = fsModule
 
-  parse(code: string, opts: any): ProgramNode {
-    return rollupParseAst(code, opts)
+  parse(code: string, opts: any): ESTree.Program {
+    return rolldownParseAst(code, opts)
   }
 
   async resolve(
@@ -885,7 +918,7 @@ class PluginContext
 
   private _formatLog<E extends RollupLog>(
     e: string | E,
-    position?: number | { column: number; line: number } | undefined,
+    position?: number | { column: number; line: number },
   ): E {
     const err = (typeof e === 'string' ? new Error(e) : e) as E
     if (err.pluginCode) {
@@ -1127,7 +1160,7 @@ class TransformPluginContext
         includeContent: true,
         hires: 'boundary',
         source: cleanUrl(this.filename),
-      })
+      }) as SourceMap
     }
     return map
   }
@@ -1211,7 +1244,8 @@ class PluginContainer {
   }
 
   // For backward compatibility, buildStart and watchChange are called only for the client environment
-  // buildStart is called per environment for a plugin with the perEnvironmentStartEndDuring dev flag
+  // buildStart is called per environment for a plugin with the perEnvironmentStartEndDuringDev flag
+  // watchChange is called per environment for a plugin with the perEnvironmentWatchChangeDuringDev flag
 
   async buildStart(_options?: InputOptions): Promise<void> {
     return (

@@ -2,10 +2,6 @@
 
 Hi! We're really excited that you're interested in contributing to Vite! Before submitting your contribution, please read through the following guide. We also suggest you read the [Project Philosophy](https://vite.dev/guide/philosophy) in our documentation.
 
-You can use [StackBlitz Codeflow](https://stackblitz.com/codeflow) to fix bugs or implement features. You'll see a Codeflow button on issues to start a PR to fix them. A button will also appear on PRs to review them without needing to check out the branch locally. When using Codeflow, the Vite repository will be cloned for you in an online editor, with the Vite package built in watch mode ready to test your changes. If you'd like to learn more, check out the [Codeflow docs](https://developer.stackblitz.com/codeflow/what-is-codeflow).
-
-[![Open in Codeflow](https://developer.stackblitz.com/img/open_in_codeflow.svg)](https://pr.new/vitejs/vite)
-
 ## Repo Setup
 
 To develop locally, fork the Vite repository and clone it in your local machine. The Vite repo is a monorepo using pnpm workspaces. The package manager used to install and link dependencies must be [pnpm](https://pnpm.io/). You can find the required pnpm version in `package.json` under the `packageManager` key.
@@ -128,19 +124,12 @@ However, this behavior may not be desirable when you are developing source map r
 
 ## Testing Vite against external packages
 
-You may wish to test your locally modified copy of Vite against another package that is built with Vite. For pnpm, after building Vite, you can use [`pnpm.overrides`](https://pnpm.io/package_json#pnpmoverrides) to do this. Note that `pnpm.overrides` must be specified in the root `package.json`, and you must list the package as a dependency in the root `package.json`:
+You may wish to test your locally modified copy of Vite against another package that is built with Vite. For pnpm, after building Vite, you can use [`overrides`](https://pnpm.io/settings#overrides) to do this. In pnpm v10.5+, `overrides` should be specified in the root `pnpm-workspace.yaml`, and you must list the package as a dependency in the root `package.json`:
 
-```json
-{
-  "dependencies": {
-    "vite": "^7.0.0"
-  },
-  "pnpm": {
-    "overrides": {
-      "vite": "link:../path/to/vite/packages/vite"
-    }
-  }
-}
+```yaml
+# pnpm-workspace.yaml
+overrides:
+  vite: link:../path/to/vite/packages/vite
 ```
 
 And re-run `pnpm install` to link the package.
@@ -187,6 +176,9 @@ test('should work', async () => {
 
 Some common test helpers (e.g. `testDir`, `isBuild`, or `editFile`) are also available in the utils. Source code is located at `playground/test-utils.ts`.
 
+> [!NOTE]
+> The dev server's file watcher runs in polling mode during tests. Polling (chokidar) only registers a file as changed when its size differs or its mtime strictly increases. On some platforms a quick in-place rewrite may not report an advanced mtime, so an edit that keeps the exact same byte length can be missed, and the expected HMR update or rebuild never fires (causing flaky timeouts). To enforce this, `editFile` throws if your replacement leaves the file's byte length unchanged; make the edit change the size (for example by adding a trailing space or an extra character that doesn't affect the test's semantics). If you trigger a watched change by some other means, make sure the edit changes the file's byte length.
+
 Note: The test build environment uses a [different default set of Vite config](https://github.com/vitejs/vite/blob/main/playground/vitestSetup.ts#L207-L227) to skip transpilation during tests to make it faster. This may produce a different result compared to the default production build.
 
 ### Extending the Test Suite
@@ -229,6 +221,9 @@ For a mock dependency, make sure you add a `@vitejs/test-` prefix to the package
 
 ## Pull Request Guidelines
 
+> [!NOTE]
+> You do not need to ask for permission to work on an open issue. You can start investigating or open a PR directly. If someone else ships a fix first, you can still help by reviewing or validating the solution.
+
 - Checkout a topic branch from a base branch (e.g. `main`), and merge back against that branch.
 
 - If adding a new feature:
@@ -238,7 +233,7 @@ For a mock dependency, make sure you add a `@vitejs/test-` prefix to the package
 - If fixing a bug:
   - If you are resolving a special issue, add `(fix #xxxx[,#xxxx])` (#xxxx is the issue id) in your PR title for a better release log (e.g. `fix: update entities encoding/decoding (fix #3899)`).
   - Provide a detailed description of the bug in the PR. Live demo preferred.
-  - Add appropriate test coverage if applicable.
+  - Add appropriate test coverage. If not applicable, explain in the PR description why tests are not included.
 
 - If it's a chore:
   - For typos and comment changes, try to combine multiple of them into a single PR.
@@ -249,7 +244,7 @@ For a mock dependency, make sure you add a `@vitejs/test-` prefix to the package
 
 - Make sure tests pass!
 
-- No need to worry about code style as long as you have installed the dev dependencies. Modified files are automatically formatted with Prettier on commit (by invoking [Git Hooks](https://git-scm.com/docs/githooks) via [simple-git-hooks](https://github.com/toplenboren/simple-git-hooks)).
+- No need to worry about code style as long as you have installed the dev dependencies. Modified files are automatically formatted with Oxfmt on commit (by invoking [Git Hooks](https://git-scm.com/docs/githooks) via [simple-git-hooks](https://github.com/toplenboren/simple-git-hooks)).
 
 - PR title must follow the [commit message convention](./.github/commit-convention.md) so that changelogs can be automatically generated.
 
@@ -356,3 +351,5 @@ If you have publish access, the steps below explain how to cut a release for a p
 3. Click on the "Review deployments" button in the yellow box, a popup will appear.
 4. Check "Release" and click "Approve and deploy".
 5. The package will start publishing to npm.
+
+To learn more about how and when Vite does releases, check out the [Releases](https://vite.dev/releases) documentation.
